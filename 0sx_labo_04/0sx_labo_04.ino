@@ -19,9 +19,9 @@ LCD_I2C lcd(0x27, 16, 2);
 
 //Variables
 unsigned long currentTime = 0;
-float dist = 0;
+int dist = 0;
 const int stepPerTurn = 2038;
-float currentPosition = 0;
+int currentPosition = 0;
 int maxSpeed = 1000;
 int speed = 200;
 int acceleration = 200;
@@ -45,22 +45,28 @@ void loop() {
   // put your main code here, to run repeatedly:
   currentTime = millis();
   
-  lcdTask(dist);
-  switch(distanceTask(currentTime, distance, dist)) {
+  lcdTask(dist, currentTime);
+  distance = distanceTask(currentTime, distance, dist);
+
+  switch(distance) {
+
   case TROP_PRES:
-    lcd.print(" trop pres");
+    lcd.print("trop pres");
     myStepper.stop();
     break;
   case PARFAITE:
+    pointeurTask(dist, stepPerTurn, currentPosition, currentTime);
     lcd.print(currentPosition); //position en degrés
-    lcd.print(" deg  ");
+    lcd.print(" deg    ");
     break;
   case TROP_LOIN:
-    lcd.print(" trop loin");
+    lcd.print("trop loin");
     myStepper.stop();
     break;
   }
   serialTask(dist, currentPosition);
+
+  myStepper.run();
   
 }
 void lcdSetup() {
@@ -72,7 +78,7 @@ void lcdSetup() {
   delay(2000);
   lcd.clear();
 }
-Distance distanceTask(unsigned long ct, Distance &distance, float &dist) {
+Distance distanceTask(unsigned long ct, Distance distance, int &dist) {
   static unsigned long previousTime = 0;
   int rate = 100;
   int minDist = 30;
@@ -96,29 +102,42 @@ Distance distanceTask(unsigned long ct, Distance &distance, float &dist) {
   
   return distance;
 }
-void lcdTask(float dist) {
-  lcd.setCursor(0, 0);
-  lcd.print("Dist : ");
-  lcd.print(dist);
-  lcd.print(" cm");
-  lcd.setCursor(1, 0);
-  lcd.print("Obj  : ");
+void lcdTask(int dist, unsigned long ct) {
+  static unsigned long previousTime = 0;
+  int rate = 100;
+
+  if(ct - previousTime >= rate) {
+    lcd.setCursor(0, 0);
+    lcd.print("Dist : ");
+    lcd.print(dist);
+    lcd.print(" cm  ");
+    lcd.setCursor(0, 1);
+    lcd.print("Obj  : ");
+  }
+
+  
   
   
 }
-void pointeurTask(float dist, const int stepPerTurn, float &currentPosition) {
+void pointeurTask(int dist, const int stepPerTurn, int &currentPosition, unsigned long ct) {
+  static unsigned long previousTime = 0;
+  int rate = 100;
+ 
   int minDist = 30;
   int maxDist = 60;
-  float maxAngle = 360.0;
-  int position = map(dist, minDist, maxDist, 0, stepPerTurn);
-  float anglePerStep = maxAngle/stepPerTurn;
+  int minAngle = 10;
+  int maxAngle = 170;
+  int stepsToMove = 0;
 
-  myStepper.moveTo(position);
-  currentPosition = myStepper.currentPosition() * anglePerStep;
+  if(ct - previousTime >= rate) {
+    currentPosition = map(dist, minDist, maxDist, minAngle, maxAngle);
+    stepsToMove = map(dist, minDist, maxDist, 0, stepPerTurn);
+  }
 
+  myStepper.moveTo(stepsToMove);
   
 }
-void serialTask(float dist, float deg) {
+void serialTask(int dist, int deg) {
   Serial.print("etd:2066931,dist:");
   Serial.print(dist);
   Serial.print(",deg:");
