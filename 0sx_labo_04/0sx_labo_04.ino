@@ -19,12 +19,17 @@ LCD_I2C lcd(0x27, 16, 2);
 
 //Variables
 unsigned long currentTime = 0;
+unsigned long previousTime = 0;
+int deltaTime = 0;
 int dist = 0;
-const int stepPerTurn = 2038;
+const int stepPerTurn = 1019;
 int currentPosition = 0;
-int maxSpeed = 1000;
-int speed = 200;
+int maxSpeed = 500;
+int speed = 500;
 int acceleration = 200;
+
+char msg1[16] = { };
+char msg2[16] = { };
 
 enum Distance {TROP_PRES, PARFAITE, TROP_LOIN};
 
@@ -34,6 +39,7 @@ void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
   lcd.begin();
+
   myStepper.setMaxSpeed(maxSpeed);
   myStepper.setSpeed(speed);
   myStepper.setAcceleration(acceleration);
@@ -44,27 +50,27 @@ void setup() {
 void loop() {
   // put your main code here, to run repeatedly:
   currentTime = millis();
-  
+  deltaTime = currentTime - previousTime;
+  previousTime = currentTime;
+
   lcdTask(dist, currentTime);
   distance = distanceTask(currentTime, distance, dist);
 
   switch(distance) {
 
   case TROP_PRES:
-    lcd.print("trop pres");
-    myStepper.stop();
+    trop_pres(currentTime);
     break;
+
   case PARFAITE:
-    pointeurTask(dist, stepPerTurn, currentPosition, currentTime);
-    lcd.print(currentPosition); //position en degrés
-    lcd.print(" deg    ");
+    parfaite(dist, stepPerTurn, currentPosition, currentTime);
     break;
+
   case TROP_LOIN:
-    lcd.print("trop loin");
-    myStepper.stop();
+    trop_loin(currentTime);
     break;
   }
-  serialTask(dist, currentPosition);
+  serialTask(dist, currentPosition, currentTime);
 
   myStepper.run();
   
@@ -79,16 +85,17 @@ void lcdSetup() {
   lcd.clear();
 }
 Distance distanceTask(unsigned long ct, Distance distance, int &dist) {
-  static unsigned long previousTime = 0;
+  static unsigned long lastTime = 0;
   int rate = 100;
+
   int minDist = 30;
   int maxDist = 60;
 
-  if(ct - previousTime >= rate) {
+  if(ct - lastTime >= rate) {
 
     dist = hc.dist();
 
-    previousTime = ct;
+    lastTime = ct;
   }
   if(dist < minDist) {
     distance = TROP_PRES;
@@ -99,47 +106,111 @@ Distance distanceTask(unsigned long ct, Distance distance, int &dist) {
   else {
     distance = PARFAITE;
   }
+
+  
   
   return distance;
 }
 void lcdTask(int dist, unsigned long ct) {
-  static unsigned long previousTime = 0;
+  static int count = 0;
+  static unsigned long lastTime = 0;
   int rate = 100;
 
-  if(ct - previousTime >= rate) {
+  if(ct - lastTime >= rate) {
     lcd.setCursor(0, 0);
     lcd.print("Dist : ");
     lcd.print(dist);
     lcd.print(" cm  ");
     lcd.setCursor(0, 1);
     lcd.print("Obj  : ");
-  }
 
-  
+    lastTime = ct;
+  }
+}
+void trop_pres(unsigned long ct) {
+  static unsigned long lastTime = 0;
+  int rate = 100;
+
+  if(ct - lastTime >= rate) {
+
+    lcd.setCursor(6, 1);
+    lcd.print(" trop pres");
+    myStepper.disableOutputs();
+
+    lastTime = ct;
+  }
   
   
 }
+void trop_loin(unsigned long ct) {
+  static unsigned long lastTime = 0;
+  int rate = 100;
+
+  if(ct - lastTime >= rate) {
+
+    lcd.setCursor(6, 1);
+    lcd.print(" trop loin");
+    myStepper.disableOutputs();
+
+    lastTime = ct;
+  }
+}
+void parfaite(int dist, const int stepPerTurn, int &currentPosition, unsigned long ct) {
+  static unsigned long lastTime = 0;
+  int rate = 100;
+
+  pointeurTask(dist, stepPerTurn, currentPosition, ct);
+
+  if(ct - lastTime >= rate) {
+
+    lcd.print(currentPosition); //position en degrés
+    lcd.print(" deg    ");
+
+    lastTime = ct;
+  }
+}
 void pointeurTask(int dist, const int stepPerTurn, int &currentPosition, unsigned long ct) {
-  static unsigned long previousTime = 0;
+  static unsigned long lastTime = 0;
   int rate = 100;
  
   int minDist = 30;
   int maxDist = 60;
   int minAngle = 10;
   int maxAngle = 170;
-  int stepsToMove = 0;
+  static int stepsToMove = 0;
 
-  if(ct - previousTime >= rate) {
+  if(ct - lastTime >= rate) {
     currentPosition = map(dist, minDist, maxDist, minAngle, maxAngle);
     stepsToMove = map(dist, minDist, maxDist, 0, stepPerTurn);
+
+    lastTime = ct;
   }
+
+  strcpy(msg2, "");
+  strcat(msg2, "Obj  :");
+  strcat(msg2, currentPosition);
 
   myStepper.moveTo(stepsToMove);
   
 }
-void serialTask(int dist, int deg) {
-  Serial.print("etd:2066931,dist:");
-  Serial.print(dist);
-  Serial.print(",deg:");
-  Serial.println(deg);
+void serialTask(int dist, int deg, unsigned long ct) {
+
+  static unsigned long lastTime = 0;
+  int rate = 100;
+
+  if(ct - lastTime >= rate) {
+
+    Serial.print("etd:2066931,dist:");
+    Serial.print(dist);
+    Serial.print(",deg:");
+    Serial.print(deg);
+
+    Serial.print("\t");
+    Serial.println(deltaTime);
+    lastTime = ct;
+  }
+  
+
+  
+
 }
