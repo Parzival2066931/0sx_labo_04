@@ -21,19 +21,26 @@ LCD_I2C lcd(0x27, 16, 2);
 unsigned long currentTime = 0;
 unsigned long previousTime = 0;
 int deltaTime = 0;
+
 int dist = 0;
-const int stepPerTurn = 1019;
+const int stepPerTurn = 2038;
 int currentPosition = 0;
-int maxSpeed = 500;
-int speed = 500;
-int acceleration = 200;
 
-char msg1[16] = { };
-char msg2[16] = { };
+const int maxSpeed = 500;
+const int speed = 500;
+const int acceleration = 200;
 
-enum Distance {TROP_PRES, PARFAITE, TROP_LOIN};
+int minDist = 30;
+int maxDist = 60;
+int minAngle = 10;
+int maxAngle = 170;
+float minStep;
+float maxStep;
 
-Distance distance = PARFAITE;
+
+enum Distance {TROP_PRES, NORMAL, TROP_LOIN};
+
+Distance distance = NORMAL;
 
 void setup() {
   // put your setup code here, to run once:
@@ -44,33 +51,39 @@ void setup() {
   myStepper.setSpeed(speed);
   myStepper.setAcceleration(acceleration);
 
+  minStep = minAngle/360.0 * stepPerTurn;
+  maxStep = maxAngle/360.0 * stepPerTurn;
+
   lcdSetup();
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
   currentTime = millis();
-  deltaTime = currentTime - previousTime;
-  previousTime = currentTime;
+  
 
-  lcdTask(dist, currentTime);
-  distance = distanceTask(currentTime, distance, dist);
+
+  lcdTask(currentTime);
+
+  getDistTask(currentTime);
+
+  distance = stateManager();
 
   switch(distance) {
 
-  case TROP_PRES:
-    trop_pres(currentTime);
-    break;
+    case TROP_PRES:
+      tooCloseState(currentTime);
+      break;
 
-  case PARFAITE:
-    parfaite(dist, stepPerTurn, currentPosition, currentTime);
-    break;
+    case NORMAL:
+      normalState(currentTime);
+      break;
 
-  case TROP_LOIN:
-    trop_loin(currentTime);
-    break;
+    case TROP_LOIN:
+      tooFarState(currentTime);
+      break;
   }
-  serialTask(dist, currentPosition, currentTime);
+  serialTask(currentTime);
 
   myStepper.run();
   
@@ -84,19 +97,8 @@ void lcdSetup() {
   delay(2000);
   lcd.clear();
 }
-Distance distanceTask(unsigned long ct, Distance distance, int &dist) {
-  static unsigned long lastTime = 0;
-  int rate = 100;
-
-  int minDist = 30;
-  int maxDist = 60;
-
-  if(ct - lastTime >= rate) {
-
-    dist = hc.dist();
-
-    lastTime = ct;
-  }
+Distance stateManager() {
+  
   if(dist < minDist) {
     distance = TROP_PRES;
   }
@@ -104,14 +106,22 @@ Distance distanceTask(unsigned long ct, Distance distance, int &dist) {
     distance = TROP_LOIN;
   }
   else {
-    distance = PARFAITE;
+    distance = NORMAL;
   }
-
-  
-  
   return distance;
 }
-void lcdTask(int dist, unsigned long ct) {
+void getDistTask(unsigned long ct) {
+  static unsigned long lastTime = 0;
+  int rate = 100;
+
+  if(ct - lastTime >= rate) {
+
+    dist = hc.dist();
+
+    lastTime = ct;
+  }
+}
+void lcdTask(unsigned long ct) {
   static int count = 0;
   static unsigned long lastTime = 0;
   int rate = 100;
@@ -127,39 +137,56 @@ void lcdTask(int dist, unsigned long ct) {
     lastTime = ct;
   }
 }
-void trop_pres(unsigned long ct) {
+
+void tooCloseState(unsigned long ct) {
   static unsigned long lastTime = 0;
   int rate = 100;
+  int minPosition = map(minDist, minDist, maxDist, minStep, maxStep);
 
   if(ct - lastTime >= rate) {
 
     lcd.setCursor(6, 1);
     lcd.print(" trop pres");
-    myStepper.disableOutputs();
+
+    
+    myStepper.moveTo(minPosition);
+
+    if(myStepper.distanceToGo() == 0) {
+      myStepper.disableOutputs();
+
+    }
 
     lastTime = ct;
   }
   
   
 }
-void trop_loin(unsigned long ct) {
+void tooFarState(unsigned long ct) {
   static unsigned long lastTime = 0;
   int rate = 100;
+  int maxPosition = map(maxDist, minDist, maxDist, minStep, maxStep);
+
 
   if(ct - lastTime >= rate) {
 
     lcd.setCursor(6, 1);
     lcd.print(" trop loin");
-    myStepper.disableOutputs();
+
+    myStepper.moveTo(maxPosition);
+    
+    if(myStepper.distanceToGo() == 0) {
+      myStepper.disableOutputs();
+
+    }
 
     lastTime = ct;
   }
 }
-void parfaite(int dist, const int stepPerTurn, int &currentPosition, unsigned long ct) {
+void normalState(unsigned long ct) {
   static unsigned long lastTime = 0;
   int rate = 100;
 
-  pointeurTask(dist, stepPerTurn, currentPosition, ct);
+  pointeurTask(ct);
 
   if(ct - lastTime >= rate) {
 
@@ -169,31 +196,28 @@ void parfaite(int dist, const int stepPerTurn, int &currentPosition, unsigned lo
     lastTime = ct;
   }
 }
-void pointeurTask(int dist, const int stepPerTurn, int &currentPosition, unsigned long ct) {
+void pointeurTask(unsigned long ct) {
   static unsigned long lastTime = 0;
   int rate = 100;
- 
-  int minDist = 30;
-  int maxDist = 60;
-  int minAngle = 10;
-  int maxAngle = 170;
+  
+  
   static int stepsToMove = 0;
 
   if(ct - lastTime >= rate) {
     currentPosition = map(dist, minDist, maxDist, minAngle, maxAngle);
-    stepsToMove = map(dist, minDist, maxDist, 0, stepPerTurn);
+    stepsToMove = map(dist, minDist, maxDist, minStep, maxStep);
 
     lastTime = ct;
   }
 
-  strcpy(msg2, "");
-  strcat(msg2, "Obj  :");
-  strcat(msg2, currentPosition);
+  if(myStepper.distanceToGo() == 0) {
+    myStepper.disableOutputs();
+  }
 
   myStepper.moveTo(stepsToMove);
   
 }
-void serialTask(int dist, int deg, unsigned long ct) {
+void serialTask(unsigned long ct) {
 
   static unsigned long lastTime = 0;
   int rate = 100;
@@ -203,10 +227,8 @@ void serialTask(int dist, int deg, unsigned long ct) {
     Serial.print("etd:2066931,dist:");
     Serial.print(dist);
     Serial.print(",deg:");
-    Serial.print(deg);
+    Serial.println(currentPosition);
 
-    Serial.print("\t");
-    Serial.println(deltaTime);
     lastTime = ct;
   }
   
@@ -214,3 +236,4 @@ void serialTask(int dist, int deg, unsigned long ct) {
   
 
 }
+
